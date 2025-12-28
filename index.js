@@ -2,38 +2,63 @@ import express from "express";
 import fetch from "node-fetch";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-// CAMBIA ESTA CLAVE
-const API_KEY = "MI_CLAVE_SECRETA_123";
+const API_KEY = process.env.API_KEY;
 
 app.get("/gamepasses/:userId", async (req, res) => {
-	if (req.headers["x-api-key"] !== API_KEY) {
-		return res.status(403).json({ error: "Forbidden" });
-	}
-
-	const userId = req.params.userId;
-	const url = `https://games.roblox.com/v1/users/${userId}/game-passes?limit=100&sortOrder=Asc`;
-
 	try {
-		const r = await fetch(url);
-		const data = await r.json();
+		const apiKey = req.headers["x-api-key"];
+		if (apiKey !== API_KEY) {
+			return res.status(403).json({ error: "Forbidden" });
+		}
 
-		const passes = data.data
-			.filter(p => p.price && p.price > 0)
-			.map(p => ({
-				id: p.id,
-				name: p.name,
-				price: p.price,
-				icon: p.iconImageId
-			}));
+		const userId = Number(req.params.userId);
+		if (!Number.isInteger(userId)) {
+			return res.status(400).json({ error: "Invalid userId" });
+		}
 
-		res.json(passes);
-	} catch {
-		res.status(500).json({ error: "Proxy error" });
+		const universeRes = await fetch(
+			`https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=50`
+		);
+
+		if (!universeRes.ok) {
+			throw new Error("Failed to fetch universes");
+		}
+
+		const universes = await universeRes.json();
+		const universeId = universes.data?.[0]?.id;
+
+		if (!universeId) {
+			return res.json([]);
+		}
+
+		const passesRes = await fetch(
+			`https://games.roblox.com/v1/games/${universeId}/game-passes?limit=100`
+		);
+
+		if (!passesRes.ok) {
+			throw new Error("Failed to fetch gamepasses");
+		}
+
+		const passes = await passesRes.json();
+
+		const result = passes.data.map(p => ({
+			id: p.id,
+			price: p.price ?? 0,
+			icon: p.iconImageAssetId ?? 0
+		}));
+
+		res.json(result);
+
+	} catch (err) {
+		console.error("PROXY ERROR:", err);
+		res.status(500).json({
+			error: "Internal Server Error",
+			detail: err.message
+		});
 	}
 });
 
-app.listen(PORT, () => {
+app.listen(process.env.PORT || 3000, () => {
 	console.log("Proxy running");
 });
